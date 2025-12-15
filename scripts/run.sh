@@ -129,6 +129,15 @@ echo "Копирование файлов проекта..."
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} "mkdir -p ~/app"
 scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} -r ./* ${SSH_USER}@${VM_IP}:~/app/
 
+# Копируем .env файл если он существует
+if [ -f ".env" ]; then
+    echo "Копирование .env файла..."
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} .env ${SSH_USER}@${VM_IP}:~/app/
+else
+    echo "✗ .env файл не найден! Создайте .env файл перед запуском."
+    exit 1
+fi
+
 echo "✓ Файлы проекта скопированы"
 
 echo "Запуск приложения через Docker Compose..."
