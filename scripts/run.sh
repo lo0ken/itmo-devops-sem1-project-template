@@ -56,6 +56,9 @@ MAX_RETRIES=5
 RETRY_DELAY=10
 VM_ID=""
 
+# Временно отключаем set -e для обработки ошибок в цикле
+set +e
+
 for retry in $(seq 1 $MAX_RETRIES); do
     echo "Попытка создания VM $retry/$MAX_RETRIES..."
 
@@ -83,14 +86,25 @@ for retry in $(seq 1 $MAX_RETRIES); do
         else
             echo "✗ Не удалось создать VM после $MAX_RETRIES попыток"
             echo "Ошибка: $VM_CREATE_OUTPUT"
+            set -e
             exit 1
         fi
     else
         echo "✗ Ошибка создания виртуальной машины:"
         echo "$VM_CREATE_OUTPUT"
+        set -e
         exit 1
     fi
 done
+
+# Включаем обратно set -e
+set -e
+
+# Проверяем, что VM создана
+if [ -z "$VM_ID" ] || [ "$VM_ID" = "null" ]; then
+    echo "✗ Не удалось создать виртуальную машину"
+    exit 1
+fi
 
 echo "Получение IP-адреса..."
 sleep 10
