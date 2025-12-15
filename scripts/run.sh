@@ -50,61 +50,27 @@ else
 fi
 
 echo "Создание виртуальной машины ${VM_NAME}..."
+echo "Используются минимальные параметры (preemptible VM для экономии квот)..."
 
-# Попытка создания VM с retry при перегрузке
-MAX_RETRIES=5
-RETRY_DELAY=10
-VM_ID=""
+VM_ID=$(yc compute instance create \
+    --name ${VM_NAME} \
+    --zone ${ZONE} \
+    --platform standard-v2 \
+    --network-interface subnet-name=${SUBNET_NAME},nat-ip-version=ipv4 \
+    --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=10 \
+    --memory 1G \
+    --cores 2 \
+    --core-fraction 5 \
+    --preemptible \
+    --ssh-key "${SSH_KEY_PATH}.pub" \
+    --format json | jq -r '.id')
 
-# Временно отключаем set -e для обработки ошибок в цикле
-set +e
-
-for retry in $(seq 1 $MAX_RETRIES); do
-    echo "Попытка создания VM $retry/$MAX_RETRIES..."
-
-    VM_CREATE_OUTPUT=$(yc compute instance create \
-        --name ${VM_NAME} \
-        --zone ${ZONE} \
-        --network-interface subnet-name=${SUBNET_NAME},nat-ip-version=ipv4 \
-        --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=20 \
-        --memory 2G \
-        --cores 2 \
-        --ssh-key "${SSH_KEY_PATH}.pub" \
-        --format json 2>&1)
-
-    VM_ID=$(echo "$VM_CREATE_OUTPUT" | jq -r '.id' 2>/dev/null)
-
-    if [ -n "$VM_ID" ] && [ "$VM_ID" != "null" ]; then
-        echo "✓ Виртуальная машина создана: ${VM_ID}"
-        break
-    fi
-
-    if echo "$VM_CREATE_OUTPUT" | grep -q "ResourceExhausted"; then
-        if [ $retry -lt $MAX_RETRIES ]; then
-            echo "⚠ Сервис перегружен, повторная попытка через ${RETRY_DELAY} секунд..."
-            sleep $RETRY_DELAY
-        else
-            echo "✗ Не удалось создать VM после $MAX_RETRIES попыток"
-            echo "Ошибка: $VM_CREATE_OUTPUT"
-            set -e
-            exit 1
-        fi
-    else
-        echo "✗ Ошибка создания виртуальной машины:"
-        echo "$VM_CREATE_OUTPUT"
-        set -e
-        exit 1
-    fi
-done
-
-# Включаем обратно set -e
-set -e
-
-# Проверяем, что VM создана
 if [ -z "$VM_ID" ] || [ "$VM_ID" = "null" ]; then
     echo "✗ Не удалось создать виртуальную машину"
     exit 1
 fi
+
+echo "✓ Виртуальная машина создана: ${VM_ID}"
 
 echo "Получение IP-адреса..."
 sleep 10
