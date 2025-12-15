@@ -5,6 +5,9 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"strconv"
+
+	"project_sem/internal/models"
 )
 
 // CSVService предоставляет методы для работы с CSV файлами
@@ -76,4 +79,34 @@ func (s *CSVService) Parse(data []byte) ([]RawPriceRecord, int, error) {
 
 	totalCount := len(records)
 	return records, totalCount, nil
+}
+
+func (s *CSVService) Generate(prices []models.Price) ([]byte, error) {
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+
+	header := []string{"id", "name", "category", "price", "create_date"}
+	if err := writer.Write(header); err != nil {
+		return nil, fmt.Errorf("failed to write CSV header: %w", err)
+	}
+
+	for _, p := range prices {
+		row := []string{
+			strconv.Itoa(p.ID),
+			p.Name,
+			p.Category,
+			strconv.FormatFloat(p.Price, 'f', 2, 64),
+			p.CreateDate.Format("2006-01-02"),
+		}
+		if err := writer.Write(row); err != nil {
+			return nil, fmt.Errorf("failed to write CSV row: %w", err)
+		}
+	}
+
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return nil, fmt.Errorf("failed to flush CSV writer: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }

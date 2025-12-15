@@ -87,3 +87,63 @@ func (r *PriceRepository) GetStatistics() (*models.Statistics, error) {
 
 	return &stats, nil
 }
+
+type PriceFilter struct {
+	StartDate *string
+	EndDate   *string
+	MinPrice  *float64
+	MaxPrice  *float64
+}
+
+func (r *PriceRepository) GetFilteredPrices(filter PriceFilter) ([]models.Price, error) {
+	query := "SELECT id, name, category, price, create_date FROM prices WHERE 1=1"
+	args := []interface{}{}
+	argIndex := 1
+
+	if filter.StartDate != nil {
+		query += fmt.Sprintf(" AND create_date >= $%d", argIndex)
+		args = append(args, *filter.StartDate)
+		argIndex++
+	}
+
+	if filter.EndDate != nil {
+		query += fmt.Sprintf(" AND create_date <= $%d", argIndex)
+		args = append(args, *filter.EndDate)
+		argIndex++
+	}
+
+	if filter.MinPrice != nil {
+		query += fmt.Sprintf(" AND price >= $%d", argIndex)
+		args = append(args, *filter.MinPrice)
+		argIndex++
+	}
+
+	if filter.MaxPrice != nil {
+		query += fmt.Sprintf(" AND price <= $%d", argIndex)
+		args = append(args, *filter.MaxPrice)
+		argIndex++
+	}
+
+	query += " ORDER BY id"
+
+	rows, err := r.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query prices: %w", err)
+	}
+	defer rows.Close()
+
+	var prices []models.Price
+	for rows.Next() {
+		var p models.Price
+		if err := rows.Scan(&p.ID, &p.Name, &p.Category, &p.Price, &p.CreateDate); err != nil {
+			return nil, fmt.Errorf("failed to scan price: %w", err)
+		}
+		prices = append(prices, p)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating prices: %w", err)
+	}
+
+	return prices, nil
+}

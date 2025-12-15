@@ -61,7 +61,6 @@ func (s *ArchiveService) extractZip(data []byte) ([]byte, error) {
 func (s *ArchiveService) extractTar(data []byte) ([]byte, error) {
 	tarReader := tar.NewReader(bytes.NewReader(data))
 
-	// Итерация по файлам в архиве
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -71,7 +70,14 @@ func (s *ArchiveService) extractTar(data []byte) ([]byte, error) {
 			return nil, fmt.Errorf("failed to read tar archive: %w", err)
 		}
 
-		// Проверка, является ли файл CSV
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+
+		if strings.Contains(header.Name, "._") {
+			continue
+		}
+
 		if strings.HasSuffix(strings.ToLower(header.Name), ".csv") {
 			csvData, err := io.ReadAll(tarReader)
 			if err != nil {
@@ -83,4 +89,25 @@ func (s *ArchiveService) extractTar(data []byte) ([]byte, error) {
 	}
 
 	return nil, fmt.Errorf("no CSV file found in tar archive")
+}
+
+func (s *ArchiveService) CreateZip(csvData []byte, filename string) ([]byte, error) {
+	var buf bytes.Buffer
+	zipWriter := zip.NewWriter(&buf)
+
+	fileWriter, err := zipWriter.Create(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file in zip: %w", err)
+	}
+
+	_, err = fileWriter.Write(csvData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to write data to zip: %w", err)
+	}
+
+	if err := zipWriter.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close zip: %w", err)
+	}
+
+	return buf.Bytes(), nil
 }

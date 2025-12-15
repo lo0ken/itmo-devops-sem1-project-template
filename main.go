@@ -45,6 +45,7 @@ func main() {
 
 	// Шаг 6: Регистрация endpoints
 	router.HandleFunc("/api/v0/prices", pricesHandler.HandlePost).Methods("POST")
+	router.HandleFunc("/api/v0/prices", pricesHandler.HandleGet).Methods("GET")
 
 	// Шаг 7: Запуск HTTP сервера
 	addr := fmt.Sprintf(":%s", cfg.Server.Port)
