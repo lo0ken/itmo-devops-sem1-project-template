@@ -4,10 +4,10 @@ set -e
 echo "=== Создание и настройка сервера в Yandex Cloud ==="
 
 VM_NAME="prices-api-vm-$(date +%s)"
-ZONE="ru-central1-a"
+ZONE="ru-central1-b"
 NETWORK_NAME="prices-api-network"
-SUBNET_NAME="prices-api-subnet-a"
-SUBNET_RANGE="10.128.0.0/24"
+SUBNET_NAME="prices-api-subnet-b"
+SUBNET_RANGE="10.129.0.0/24"
 IMAGE_FAMILY="ubuntu-2204-lts"
 SSH_USER="ubuntu"
 SSH_KEY_PATH="${HOME}/.ssh/id_rsa"
@@ -50,15 +50,14 @@ else
 fi
 
 echo "Создание виртуальной машины ${VM_NAME}..."
-echo "Используются минимальные параметры (preemptible VM для экономии квот)..."
 
 VM_ID=$(yc compute instance create \
     --name ${VM_NAME} \
     --zone ${ZONE} \
     --platform standard-v2 \
     --network-interface subnet-name=${SUBNET_NAME},nat-ip-version=ipv4 \
-    --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=10 \
-    --memory 1G \
+    --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=8 \
+    --memory 512M \
     --cores 2 \
     --core-fraction 5 \
     --preemptible \
