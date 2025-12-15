@@ -3,15 +3,15 @@ set -e
 
 echo "=== Создание и настройка сервера в Yandex Cloud ==="
 
-# Конфигурация
 VM_NAME="prices-api-vm-$(date +%s)"
 ZONE="ru-central1-a"
-SUBNET_NAME="default-ru-central1-a"
+NETWORK_NAME="prices-api-network"
+SUBNET_NAME="prices-api-subnet-a"
+SUBNET_RANGE="10.128.0.0/24"
 IMAGE_FAMILY="ubuntu-2204-lts"
 SSH_USER="ubuntu"
 SSH_KEY_PATH="${HOME}/.ssh/id_rsa"
 
-# Проверяем наличие SSH ключа
 if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
     echo "✗ SSH ключ не найден: ${SSH_KEY_PATH}.pub"
     echo "Создайте SSH ключ с помощью команды:"
@@ -19,7 +19,36 @@ if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
     exit 1
 fi
 
-# Создаем виртуальную машину
+echo "Проверка наличия сети..."
+NETWORK_ID=$(yc vpc network list --format json | jq -r ".[] | select(.name==\"${NETWORK_NAME}\") | .id")
+
+if [ -z "$NETWORK_ID" ]; then
+    echo "Сеть не найдена, создаём новую сеть ${NETWORK_NAME}..."
+    NETWORK_ID=$(yc vpc network create \
+        --name ${NETWORK_NAME} \
+        --description "Network for prices API service" \
+        --format json | jq -r '.id')
+    echo "✓ Сеть создана: ${NETWORK_ID}"
+else
+    echo "✓ Сеть уже существует: ${NETWORK_ID}"
+fi
+
+echo "Проверка наличия подсети..."
+SUBNET_ID=$(yc vpc subnet list --format json | jq -r ".[] | select(.name==\"${SUBNET_NAME}\") | .id")
+
+if [ -z "$SUBNET_ID" ]; then
+    echo "Подсеть не найдена, создаём новую подсеть ${SUBNET_NAME}..."
+    SUBNET_ID=$(yc vpc subnet create \
+        --name ${SUBNET_NAME} \
+        --zone ${ZONE} \
+        --network-id ${NETWORK_ID} \
+        --range ${SUBNET_RANGE} \
+        --format json | jq -r '.id')
+    echo "✓ Подсеть создана: ${SUBNET_ID}"
+else
+    echo "✓ Подсеть уже существует: ${SUBNET_ID}"
+fi
+
 echo "Создание виртуальной машины ${VM_NAME}..."
 VM_ID=$(yc compute instance create \
     --name ${VM_NAME} \
@@ -33,7 +62,6 @@ VM_ID=$(yc compute instance create \
 
 echo "✓ Виртуальная машина создана: ${VM_ID}"
 
-# Получаем IP-адрес
 echo "Получение IP-адреса..."
 sleep 10  # Даем время на инициализацию
 
@@ -46,7 +74,6 @@ fi
 
 echo "✓ IP-адрес получен: ${VM_IP}"
 
-# Ожидание готовности SSH
 echo "Ожидание готовности SSH..."
 max_attempts=60
 attempt=0
@@ -63,49 +90,38 @@ done
 
 echo "✓ SSH подключение готово"
 
-# Устанавливаем Docker и Docker Compose на удалённом сервере
 echo "Установка Docker и Docker Compose..."
 ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} << 'ENDSSH'
     set -e
 
-    # Обновляем пакеты
     sudo apt-get update
 
-    # Устанавливаем необходимые пакеты
     sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
 
-    # Добавляем GPG ключ Docker
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 
-    # Добавляем репозиторий Docker
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-    # Устанавливаем Docker
     sudo apt-get update
     sudo apt-get install -y docker-ce docker-ce-cli containerd.io
 
-    # Добавляем пользователя в группу docker
     sudo usermod -aG docker $USER
 
-    # Устанавливаем Docker Compose
     sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     sudo chmod +x /usr/local/bin/docker-compose
 
-    # Запускаем Docker
     sudo systemctl start docker
     sudo systemctl enable docker
 ENDSSH
 
 echo "✓ Docker и Docker Compose установлены"
 
-# Копируем файлы проекта на сервер
 echo "Копирование файлов проекта..."
 ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "mkdir -p ~/app"
 scp -o StrictHostKeyChecking=no -r ./* ${SSH_USER}@${VM_IP}:~/app/
 
 echo "✓ Файлы проекта скопированы"
 
-# Запускаем приложение на удалённом сервере
 echo "Запуск приложения через Docker Compose..."
 ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} << 'ENDSSH'
     set -e
@@ -120,7 +136,6 @@ ENDSSH
 
 echo "✓ Приложение запущено"
 
-# Ожидание готовности API
 echo "Ожидание готовности API..."
 max_attempts=60
 attempt=0
@@ -137,7 +152,6 @@ done
 
 echo "✓ API готов к работе"
 
-# Сохраняем IP-адрес в файл для использования в тестах
 echo "${VM_IP}" > .vm_ip
 
 echo ""

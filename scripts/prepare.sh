@@ -3,7 +3,6 @@ set -e
 
 echo "=== Сборка Docker-образа ==="
 
-# Определяем имя образа
 IMAGE_NAME="prices-api"
 IMAGE_TAG="latest"
 
@@ -12,7 +11,6 @@ docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
 
 echo "✓ Docker-образ успешно собран"
 
-# Проверяем, что образ создан
 if docker images | grep -q "${IMAGE_NAME}"; then
     echo "✓ Образ ${IMAGE_NAME}:${IMAGE_TAG} готов к использованию"
 else
