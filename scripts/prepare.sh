@@ -1,32 +1,23 @@
 #!/bin/bash
 set -e
 
-echo "=== Подготовка окружения ==="
+echo "=== Сборка Docker-образа ==="
 
-echo "Скачивание Go зависимостей..."
-go mod download
-echo "✓ Зависимости загружены"
+# Определяем имя образа
+IMAGE_NAME="prices-api"
+IMAGE_TAG="latest"
 
-echo "Проверка подключения к PostgreSQL..."
+echo "Сборка образа ${IMAGE_NAME}:${IMAGE_TAG}..."
+docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
 
-export PGPASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_HOST=${POSTGRES_HOST}
-POSTGRES_USER=${POSTGRES_USER}
-POSTGRES_DB=${POSTGRES_DB}
+echo "✓ Docker-образ успешно собран"
 
-attempt=0
-max_attempts=30
-
-until psql -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c '\q' 2>/dev/null; do
-  attempt=$((attempt + 1))
-  if [ $attempt -ge $max_attempts ]; then
-    echo "✗ PostgreSQL недоступен после $max_attempts попыток"
+# Проверяем, что образ создан
+if docker images | grep -q "${IMAGE_NAME}"; then
+    echo "✓ Образ ${IMAGE_NAME}:${IMAGE_TAG} готов к использованию"
+else
+    echo "✗ Ошибка при создании образа"
     exit 1
-  fi
-  echo "PostgreSQL недоступен, ожидание... (попытка $attempt/$max_attempts)"
-  sleep 1
-done
-
-echo "✓ PostgreSQL готов к работе"
+fi
 
 echo "=== Подготовка завершена успешно ==="

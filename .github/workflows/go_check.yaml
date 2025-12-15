@@ -1,4 +1,4 @@
-name: Go Test Pipeline
+name: Yandex Cloud CI/CD Pipeline
 
 on:
   push:
@@ -7,35 +7,35 @@ on:
     branches: [ main, master ]
 
 jobs:
-  test:
-    name: Run Tests
+  deploy-and-test:
+    name: Deploy to Yandex Cloud and Run Tests
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_DB: project-sem-1
-          POSTGRES_USER: validator
-          POSTGRES_PASSWORD: val1dat0r
-        ports:
-          - 5432:5432
-        # Добавляем volume для сохранения данных
-        volumes:
-          - postgres_data:/var/lib/postgresql/data
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: '1.23'
+    - name: Install Yandex Cloud CLI
+      run: |
+        curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash
+        echo "$HOME/yandex-cloud/bin" >> $GITHUB_PATH
+
+    - name: Configure Yandex Cloud CLI
+      run: |
+        yc config profile create ci-profile
+        yc config set service-account-key <(echo '${{ secrets.YC_SERVICE_ACCOUNT_KEY }}')
+        yc config set cloud-id ${{ secrets.YC_CLOUD_ID }}
+        yc config set folder-id ${{ secrets.YC_FOLDER_ID }}
+
+    - name: Install jq
+      run: sudo apt-get update && sudo apt-get install -y jq
+
+    - name: Generate SSH key
+      run: |
+        mkdir -p ~/.ssh
+        ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N ""
+        chmod 600 ~/.ssh/id_rsa
+        chmod 644 ~/.ssh/id_rsa.pub
 
     - name: Make scripts executable
       run: |
@@ -43,50 +43,38 @@ jobs:
         chmod +x scripts/run.sh
         chmod +x scripts/tests.sh
 
-    - name: Prepare environment
+    - name: Build Docker image locally
       run: ./scripts/prepare.sh
 
-    - name: Run application
-      run: ./scripts/run.sh
-      env:
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
-        POSTGRES_DB: project-sem-1
-        POSTGRES_USER: validator
-        POSTGRES_PASSWORD: val1dat0r
+    - name: Deploy to Yandex Cloud
+      id: deploy
+      run: |
+        ./scripts/run.sh
+        echo "VM_IP=$(cat .vm_ip)" >> $GITHUB_OUTPUT
 
     - name: Test Level 1
       id: test-level-1
       continue-on-error: true
       run: ./scripts/tests.sh 1
-      env:
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
-        POSTGRES_DB: project-sem-1
-        POSTGRES_USER: validator
-        POSTGRES_PASSWORD: val1dat0r
 
     - name: Test Level 2
       id: test-level-2
       continue-on-error: true
       run: ./scripts/tests.sh 2
-      env:
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
-        POSTGRES_DB: project-sem-1
-        POSTGRES_USER: validator
-        POSTGRES_PASSWORD: val1dat0r
 
     - name: Test Level 3
       id: test-level-3
       continue-on-error: true
       run: ./scripts/tests.sh 3
-      env:
-        POSTGRES_HOST: localhost
-        POSTGRES_PORT: 5432
-        POSTGRES_DB: project-sem-1
-        POSTGRES_USER: validator
-        POSTGRES_PASSWORD: val1dat0r
+
+    - name: Get VM logs on failure
+      if: failure()
+      run: |
+        if [ -f ".vm_ip" ]; then
+          VM_IP=$(cat .vm_ip)
+          echo "=== Fetching logs from VM: $VM_IP ==="
+          ssh -o StrictHostKeyChecking=no ubuntu@$VM_IP "sudo docker-compose -f ~/app/docker-compose.yml logs" || true
+        fi
 
     - name: Check test results
       if: always()
@@ -94,9 +82,23 @@ jobs:
         if [[ "${{ steps.test-level-1.outcome }}" == "success" ]] || \
            [[ "${{ steps.test-level-2.outcome }}" == "success" ]] || \
            [[ "${{ steps.test-level-3.outcome }}" == "success" ]]; then
-          echo "At least one test level passed successfully!"
+          echo "✓ At least one test level passed successfully!"
           exit 0
         else
-          echo "All test levels failed!"
+          echo "✗ All test levels failed!"
           exit 1
+        fi
+
+    - name: Cleanup - Delete VM
+      if: always()
+      run: |
+        if [ -f ".vm_ip" ]; then
+          VM_LIST=$(yc compute instance list --format json | jq -r '.[] | select(.name | startswith("prices-api-vm-")) | .id')
+
+          for VM_ID in $VM_LIST; do
+            echo "Deleting VM: $VM_ID"
+            yc compute instance delete $VM_ID --async || true
+          done
+
+          rm -f .vm_ip
         fi

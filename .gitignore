@@ -18,3 +18,4 @@ CLAUDE.md
 *.ipr
 
 .env
+.vm_ip

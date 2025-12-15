@@ -1,39 +1,147 @@
 #!/bin/bash
 set -e
 
-echo "=== Запуск приложения ==="
+echo "=== Создание и настройка сервера в Yandex Cloud ==="
 
-echo "Компиляция приложения..."
-go build -o app main.go
-echo "✓ Компиляция завершена"
+# Конфигурация
+VM_NAME="prices-api-vm-$(date +%s)"
+ZONE="ru-central1-a"
+SUBNET_NAME="default-ru-central1-a"
+IMAGE_FAMILY="ubuntu-2204-lts"
+SSH_USER="ubuntu"
+SSH_KEY_PATH="${HOME}/.ssh/id_rsa"
 
-echo "Запуск приложения в фоновом режиме..."
-./app &
-APP_PID=$!
-echo "✓ Приложение запущено с PID: $APP_PID"
-
-echo "Ожидание готовности API..."
-
-attempt=0
-max_attempts=30
-
-for i in $(seq 1 $max_attempts); do
-  if curl -s -o /dev/null http://localhost:8080/api/v0/prices 2>/dev/null; then
-    echo "✓ API готов к работе!"
-    echo "=== Приложение успешно запущено ==="
-    exit 0
-  fi
-
-  if ! kill -0 $APP_PID 2>/dev/null; then
-    echo "✗ Приложение завершилось с ошибкой"
+# Проверяем наличие SSH ключа
+if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
+    echo "✗ SSH ключ не найден: ${SSH_KEY_PATH}.pub"
+    echo "Создайте SSH ключ с помощью команды:"
+    echo "  ssh-keygen -t rsa -b 4096 -f ${SSH_KEY_PATH}"
     exit 1
-  fi
+fi
 
-  echo "API недоступен, ожидание... (попытка $i/$max_attempts)"
-  sleep 1
+# Создаем виртуальную машину
+echo "Создание виртуальной машины ${VM_NAME}..."
+VM_ID=$(yc compute instance create \
+    --name ${VM_NAME} \
+    --zone ${ZONE} \
+    --network-interface subnet-name=${SUBNET_NAME},nat-ip-version=ipv4 \
+    --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=20 \
+    --memory 2G \
+    --cores 2 \
+    --ssh-key "${SSH_KEY_PATH}.pub" \
+    --format json | jq -r '.id')
+
+echo "✓ Виртуальная машина создана: ${VM_ID}"
+
+# Получаем IP-адрес
+echo "Получение IP-адреса..."
+sleep 10  # Даем время на инициализацию
+
+VM_IP=$(yc compute instance get ${VM_ID} --format json | jq -r '.network_interfaces[0].primary_v4_address.one_to_one_nat.address')
+
+if [ -z "$VM_IP" ] || [ "$VM_IP" = "null" ]; then
+    echo "✗ Не удалось получить IP-адрес"
+    exit 1
+fi
+
+echo "✓ IP-адрес получен: ${VM_IP}"
+
+# Ожидание готовности SSH
+echo "Ожидание готовности SSH..."
+max_attempts=60
+attempt=0
+
+while ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 ${SSH_USER}@${VM_IP} "echo 'SSH ready'" 2>/dev/null; do
+    attempt=$((attempt + 1))
+    if [ $attempt -ge $max_attempts ]; then
+        echo "✗ SSH не стал доступен"
+        exit 1
+    fi
+    echo "SSH недоступен, ожидание... (попытка $attempt/$max_attempts)"
+    sleep 5
 done
 
-echo "✗ API не стал доступен за $max_attempts секунд"
-echo "Остановка приложения..."
-kill $APP_PID 2>/dev/null || true
-exit 1
+echo "✓ SSH подключение готово"
+
+# Устанавливаем Docker и Docker Compose на удалённом сервере
+echo "Установка Docker и Docker Compose..."
+ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} << 'ENDSSH'
+    set -e
+
+    # Обновляем пакеты
+    sudo apt-get update
+
+    # Устанавливаем необходимые пакеты
+    sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common
+
+    # Добавляем GPG ключ Docker
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+    # Добавляем репозиторий Docker
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    # Устанавливаем Docker
+    sudo apt-get update
+    sudo apt-get install -y docker-ce docker-ce-cli containerd.io
+
+    # Добавляем пользователя в группу docker
+    sudo usermod -aG docker $USER
+
+    # Устанавливаем Docker Compose
+    sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo chmod +x /usr/local/bin/docker-compose
+
+    # Запускаем Docker
+    sudo systemctl start docker
+    sudo systemctl enable docker
+ENDSSH
+
+echo "✓ Docker и Docker Compose установлены"
+
+# Копируем файлы проекта на сервер
+echo "Копирование файлов проекта..."
+ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "mkdir -p ~/app"
+scp -o StrictHostKeyChecking=no -r ./* ${SSH_USER}@${VM_IP}:~/app/
+
+echo "✓ Файлы проекта скопированы"
+
+# Запускаем приложение на удалённом сервере
+echo "Запуск приложения через Docker Compose..."
+ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} << 'ENDSSH'
+    set -e
+    cd ~/app
+
+    # Запускаем Docker Compose (нужно использовать sudo для новой сессии)
+    sudo docker-compose up -d --build
+
+    # Проверяем статус контейнеров
+    sudo docker-compose ps
+ENDSSH
+
+echo "✓ Приложение запущено"
+
+# Ожидание готовности API
+echo "Ожидание готовности API..."
+max_attempts=60
+attempt=0
+
+while ! curl -s -o /dev/null http://${VM_IP}:8080/api/v0/prices 2>/dev/null; do
+    attempt=$((attempt + 1))
+    if [ $attempt -ge $max_attempts ]; then
+        echo "✗ API не стал доступен"
+        exit 1
+    fi
+    echo "API недоступен, ожидание... (попытка $attempt/$max_attempts)"
+    sleep 5
+done
+
+echo "✓ API готов к работе"
+
+# Сохраняем IP-адрес в файл для использования в тестах
+echo "${VM_IP}" > .vm_ip
+
+echo ""
+echo "=== Развёртывание завершено успешно ==="
+echo "IP-адрес сервера: ${VM_IP}"
+echo "API доступен по адресу: http://${VM_IP}:8080"
+echo ""

@@ -7,8 +7,18 @@ RED='\033[0;31m'
 NC='\033[0m' # No Color
 
 # Конфигурация
-API_HOST="http://localhost:8080"
-DB_HOST="localhost"
+# Проверяем, есть ли файл с IP-адресом удалённого сервера
+if [ -f ".vm_ip" ]; then
+    VM_IP=$(cat .vm_ip)
+    API_HOST="http://${VM_IP}:8080"
+    DB_HOST="${VM_IP}"
+    echo "Используется удалённый сервер: ${VM_IP}"
+else
+    API_HOST="http://localhost:8080"
+    DB_HOST="localhost"
+    echo "Используется локальный сервер"
+fi
+
 DB_PORT="5432"
 DB_NAME="project-sem-1"
 DB_USER="validator"
@@ -228,63 +238,92 @@ check_api_complex() {
 
 check_postgres() {
     local level=$1
-    
+
     echo -e "\nПроверка PostgreSQL (Уровень $level)"
-    
+
+    # Определяем, как выполнять команды psql (локально или через SSH)
+    if [ -f ".vm_ip" ]; then
+        VM_IP=$(cat .vm_ip)
+        SSH_USER="ubuntu"
+        PSQL_CMD="ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} \"sudo docker exec \$(sudo docker ps -qf name=postgres) psql -U $DB_USER -d $DB_NAME"
+    else
+        PSQL_CMD="PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME"
+    fi
+
     # Базовая проверка подключения для всех уровней
-    if ! PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\q' 2>/dev/null; then
-        echo -e "${RED}✗ PostgreSQL недоступен${NC}"
-        return 1
+    if [ -f ".vm_ip" ]; then
+        if ! ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "sudo docker exec \$(sudo docker ps -qf name=postgres) psql -U $DB_USER -d $DB_NAME -c '\q'" 2>/dev/null; then
+            echo -e "${RED}✗ PostgreSQL недоступен${NC}"
+            return 1
+        fi
+    else
+        if ! PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c '\q' 2>/dev/null; then
+            echo -e "${RED}✗ PostgreSQL недоступен${NC}"
+            return 1
+        fi
     fi
     
     case $level in
-        1)  
+        1)
             echo "Выполняем проверку уровня 1"
-            if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "
-                SELECT COUNT(*) FROM prices;" 2>/dev/null; then
-                echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
-                return 0
+            if [ -f ".vm_ip" ]; then
+                if ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "sudo docker exec \$(sudo docker ps -qf name=postgres) psql -U $DB_USER -d $DB_NAME -c 'SELECT COUNT(*) FROM prices;'" 2>/dev/null; then
+                    echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
+                    return 0
+                else
+                    echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
+                    return 1
+                fi
             else
-                echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
-                return 1
+                if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "SELECT COUNT(*) FROM prices;" 2>/dev/null; then
+                    echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
+                    return 0
+                else
+                    echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
+                    return 1
+                fi
             fi
             ;;
-            
-        2)  
+
+        2)
             echo "Выполняем проверку уровня 2"
-            if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "
-                SELECT 
-                    COUNT(*) as total_items,
-                    COUNT(DISTINCT category) as total_categories,
-                    SUM(price) as total_price
-                FROM prices;" 2>/dev/null; then
-                echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
-                return 0
+            if [ -f ".vm_ip" ]; then
+                if ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "sudo docker exec \$(sudo docker ps -qf name=postgres) psql -U $DB_USER -d $DB_NAME -c 'SELECT COUNT(*) as total_items, COUNT(DISTINCT category) as total_categories, SUM(price) as total_price FROM prices;'" 2>/dev/null; then
+                    echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
+                    return 0
+                else
+                    echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
+                    return 1
+                fi
             else
-                echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
-                return 1
+                if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "SELECT COUNT(*) as total_items, COUNT(DISTINCT category) as total_categories, SUM(price) as total_price FROM prices;" 2>/dev/null; then
+                    echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
+                    return 0
+                else
+                    echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
+                    return 1
+                fi
             fi
             ;;
-            
-        3)  
+
+        3)
             echo "Выполняем проверку уровня 3"
-            if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "
-                WITH stats AS (
-                    SELECT 
-                        COUNT(*) as total_items,
-                        COUNT(DISTINCT category) as total_categories,
-                        SUM(price) as total_price,
-                        COUNT(*) - COUNT(DISTINCT (name, category, price)) as duplicates
-                    FROM prices
-                    WHERE create_date BETWEEN '2024-01-01' AND '2024-01-31'
-                    AND price BETWEEN 300 AND 1000
-                )
-                SELECT * FROM stats;" 2>/dev/null; then
-                echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
-                return 0
+            if [ -f ".vm_ip" ]; then
+                if ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "sudo docker exec \$(sudo docker ps -qf name=postgres) psql -U $DB_USER -d $DB_NAME -c \"WITH stats AS (SELECT COUNT(*) as total_items, COUNT(DISTINCT category) as total_categories, SUM(price) as total_price, COUNT(*) - COUNT(DISTINCT (name, category, price)) as duplicates FROM prices WHERE create_date BETWEEN '2024-01-01' AND '2024-01-31' AND price BETWEEN 300 AND 1000) SELECT * FROM stats;\"" 2>/dev/null; then
+                    echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
+                    return 0
+                else
+                    echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
+                    return 1
+                fi
             else
-                echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
-                return 1
+                if PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -c "WITH stats AS (SELECT COUNT(*) as total_items, COUNT(DISTINCT category) as total_categories, SUM(price) as total_price, COUNT(*) - COUNT(DISTINCT (name, category, price)) as duplicates FROM prices WHERE create_date BETWEEN '2024-01-01' AND '2024-01-31' AND price BETWEEN 300 AND 1000) SELECT * FROM stats;" 2>/dev/null; then
+                    echo -e "${GREEN}✓ PostgreSQL работает корректно${NC}"
+                    return 0
+                else
+                    echo -e "${RED}✗ Ошибка выполнения запроса${NC}"
+                    return 1
+                fi
             fi
             ;;
         *)
