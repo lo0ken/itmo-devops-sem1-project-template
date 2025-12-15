@@ -9,7 +9,7 @@ NETWORK_NAME="prices-api-network"
 SUBNET_NAME="prices-api-subnet-b"
 SUBNET_RANGE="10.129.0.0/24"
 IMAGE_FAMILY="ubuntu-2204-lts"
-SSH_USER="looken"
+SSH_USER="ubuntu"
 SSH_KEY_PATH="${HOME}/.ssh/id_rsa"
 
 if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
@@ -61,7 +61,7 @@ VM_ID=$(yc compute instance create \
     --cores 2 \
     --core-fraction 5 \
     --preemptible \
-    --ssh-key "${SSH_KEY_PATH}.pub" \
+    --metadata ssh-keys="${SSH_USER}:$(cat ${SSH_KEY_PATH}.pub)" \
     --format json | jq -r '.id')
 
 if [ -z "$VM_ID" ] || [ "$VM_ID" = "null" ]; then
@@ -87,7 +87,7 @@ echo "Ожидание готовности SSH..."
 max_attempts=60
 attempt=0
 
-while ! ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 ${SSH_USER}@${VM_IP} "echo 'SSH ready'" 2>/dev/null; do
+while ! ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} "echo 'SSH ready'" 2>/dev/null; do
     attempt=$((attempt + 1))
     if [ $attempt -ge $max_attempts ]; then
         echo "✗ SSH не стал доступен"
@@ -100,7 +100,7 @@ done
 echo "✓ SSH подключение готово"
 
 echo "Установка Docker и Docker Compose..."
-ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} << 'ENDSSH'
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} << 'ENDSSH'
     set -e
 
     sudo apt-get update
@@ -126,13 +126,13 @@ ENDSSH
 echo "✓ Docker и Docker Compose установлены"
 
 echo "Копирование файлов проекта..."
-ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} "mkdir -p ~/app"
-scp -o StrictHostKeyChecking=no -r ./* ${SSH_USER}@${VM_IP}:~/app/
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} "mkdir -p ~/app"
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} -r ./* ${SSH_USER}@${VM_IP}:~/app/
 
 echo "✓ Файлы проекта скопированы"
 
 echo "Запуск приложения через Docker Compose..."
-ssh -o StrictHostKeyChecking=no ${SSH_USER}@${VM_IP} << 'ENDSSH'
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} << 'ENDSSH'
     set -e
     cd ~/app
 
