@@ -50,20 +50,50 @@ else
 fi
 
 echo "Создание виртуальной машины ${VM_NAME}..."
-VM_ID=$(yc compute instance create \
-    --name ${VM_NAME} \
-    --zone ${ZONE} \
-    --network-interface subnet-name=${SUBNET_NAME},nat-ip-version=ipv4 \
-    --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=20 \
-    --memory 2G \
-    --cores 2 \
-    --ssh-key "${SSH_KEY_PATH}.pub" \
-    --format json | jq -r '.id')
 
-echo "✓ Виртуальная машина создана: ${VM_ID}"
+# Попытка создания VM с retry при перегрузке
+MAX_RETRIES=5
+RETRY_DELAY=10
+VM_ID=""
+
+for retry in $(seq 1 $MAX_RETRIES); do
+    echo "Попытка создания VM $retry/$MAX_RETRIES..."
+
+    VM_CREATE_OUTPUT=$(yc compute instance create \
+        --name ${VM_NAME} \
+        --zone ${ZONE} \
+        --network-interface subnet-name=${SUBNET_NAME},nat-ip-version=ipv4 \
+        --create-boot-disk image-folder-id=standard-images,image-family=${IMAGE_FAMILY},size=20 \
+        --memory 2G \
+        --cores 2 \
+        --ssh-key "${SSH_KEY_PATH}.pub" \
+        --format json 2>&1)
+
+    VM_ID=$(echo "$VM_CREATE_OUTPUT" | jq -r '.id' 2>/dev/null)
+
+    if [ -n "$VM_ID" ] && [ "$VM_ID" != "null" ]; then
+        echo "✓ Виртуальная машина создана: ${VM_ID}"
+        break
+    fi
+
+    if echo "$VM_CREATE_OUTPUT" | grep -q "ResourceExhausted"; then
+        if [ $retry -lt $MAX_RETRIES ]; then
+            echo "⚠ Сервис перегружен, повторная попытка через ${RETRY_DELAY} секунд..."
+            sleep $RETRY_DELAY
+        else
+            echo "✗ Не удалось создать VM после $MAX_RETRIES попыток"
+            echo "Ошибка: $VM_CREATE_OUTPUT"
+            exit 1
+        fi
+    else
+        echo "✗ Ошибка создания виртуальной машины:"
+        echo "$VM_CREATE_OUTPUT"
+        exit 1
+    fi
+done
 
 echo "Получение IP-адреса..."
-sleep 10  # Даем время на инициализацию
+sleep 10
 
 VM_IP=$(yc compute instance get ${VM_ID} --format json | jq -r '.network_interfaces[0].primary_v4_address.one_to_one_nat.address')
 
