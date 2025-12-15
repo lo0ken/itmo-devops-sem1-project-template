@@ -9,7 +9,7 @@ NETWORK_NAME="prices-api-network"
 SUBNET_NAME="prices-api-subnet-b"
 SUBNET_RANGE="10.129.0.0/24"
 IMAGE_FAMILY="ubuntu-2204-lts"
-SSH_USER="ubuntu"
+SSH_USER="looken"
 SSH_KEY_PATH="${HOME}/.ssh/id_rsa"
 
 if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
