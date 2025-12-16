@@ -11,6 +11,8 @@ SUBNET_RANGE="10.129.0.0/24"
 IMAGE_FAMILY="ubuntu-2204-lts"
 SSH_USER="ubuntu"
 SSH_KEY_PATH="${HOME}/.ssh/id_rsa"
+DOCKER_IMAGE="lo0ken/prices_backend"
+IMAGE_TAG="${IMAGE_TAG:-latest}"
 
 if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
     echo "✗ SSH ключ не найден: ${SSH_KEY_PATH}.pub"
@@ -18,6 +20,15 @@ if [ ! -f "${SSH_KEY_PATH}.pub" ]; then
     echo "  ssh-keygen -t rsa -b 4096 -f ${SSH_KEY_PATH}"
     exit 1
 fi
+
+# Проверяем .env файл перед началом работы
+if [ ! -f ".env" ]; then
+    echo "✗ .env файл не найден! Создайте .env файл перед запуском."
+    exit 1
+fi
+
+echo "Примечание: Убедитесь, что образ ${DOCKER_IMAGE}:${IMAGE_TAG} уже собран и загружен в registry"
+echo "Используйте ./scripts/prepare.sh для сборки и публикации образа"
 
 echo "Проверка наличия сети..."
 NETWORK_ID=$(yc vpc network list --format json | jq -r ".[] | select(.name==\"${NETWORK_NAME}\") | .id")
@@ -116,7 +127,7 @@ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PAT
 
     sudo usermod -aG docker $USER
 
-    sudo curl -L "https://github.com/docker/compose/releases/download/v2.20.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+    sudo curl -L "https://github.com/docker/compose/releases/download/v2.31.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
     sudo chmod +x /usr/local/bin/docker-compose
 
     sudo systemctl start docker
@@ -125,28 +136,25 @@ ENDSSH
 
 echo "✓ Docker и Docker Compose установлены"
 
-echo "Копирование файлов проекта..."
+echo "Копирование конфигурационных файлов..."
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} "mkdir -p ~/app"
-scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} -r ./* ${SSH_USER}@${VM_IP}:~/app/
 
-# Копируем .env файл если он существует
-if [ -f ".env" ]; then
-    echo "Копирование .env файла..."
-    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} .env ${SSH_USER}@${VM_IP}:~/app/
-else
-    echo "✗ .env файл не найден! Создайте .env файл перед запуском."
-    exit 1
-fi
+# Копируем только необходимые файлы
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} docker-compose.production.yml ${SSH_USER}@${VM_IP}:~/app/docker-compose.yml
+scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} .env ${SSH_USER}@${VM_IP}:~/app/
 
-echo "✓ Файлы проекта скопированы"
+echo "✓ Конфигурационные файлы скопированы"
 
 echo "Запуск приложения через Docker Compose..."
 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ${SSH_KEY_PATH} ${SSH_USER}@${VM_IP} << 'ENDSSH'
     set -e
     cd ~/app
 
-    # Запускаем Docker Compose (нужно использовать sudo для новой сессии)
-    sudo docker-compose up -d --build
+    # Подтягиваем образ из registry
+    sudo docker-compose pull
+
+    # Запускаем Docker Compose
+    sudo docker-compose up -d
 
     # Проверяем статус контейнеров
     sudo docker-compose ps

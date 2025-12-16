@@ -9,9 +9,7 @@ services:
       - pg_data:/var/lib/postgresql/data
 
   backend:
-    build: .
+    image: lo0ken/prices_backend
     env_file: .env
-    ports:
-      - "8080:8080"
     depends_on:
       - postgres
