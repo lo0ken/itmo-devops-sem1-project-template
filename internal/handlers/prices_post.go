@@ -11,7 +11,6 @@ import (
 	"project_sem/internal/services"
 )
 
-// PricesHandler обрабатывает HTTP запросы к /api/v0/prices
 type PricesHandler struct {
 	archiveService   *services.ArchiveService
 	csvService       *services.CSVService
@@ -19,7 +18,6 @@ type PricesHandler struct {
 	repo             *repository.PriceRepository
 }
 
-// NewPricesHandler создает новый экземпляр handler
 func NewPricesHandler(
 	archiveService *services.ArchiveService,
 	csvService *services.CSVService,
@@ -34,26 +32,21 @@ func NewPricesHandler(
 	}
 }
 
-// HandlePost обрабатывает POST /api/v0/prices
 func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
-	// Установка Content-Type для JSON ответа
 	w.Header().Set("Content-Type", "application/json")
 
-	// Шаг 1: Парсинг query параметра "type" (default: "zip")
 	archiveType := r.URL.Query().Get("type")
 	if archiveType == "" {
 		archiveType = "zip"
 	}
 
-	// Проверка типа архива
 	if archiveType != "zip" && archiveType != "tar" {
 		w.WriteHeader(http.StatusBadRequest)
 		json.NewEncoder(w).Encode(map[string]string{"error": "invalid archive type"})
 		return
 	}
 
-	// Шаг 2: Парсинг multipart form, извлечение файла
-	err := r.ParseMultipartForm(32 << 20) // 32MB max
+	err := r.ParseMultipartForm(32 << 20)
 	if err != nil {
 		log.Printf("Failed to parse multipart form: %v", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -70,7 +63,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	// Чтение файла в память
 	fileData, err := io.ReadAll(file)
 	if err != nil {
 		log.Printf("Failed to read file: %v", err)
@@ -79,7 +71,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Шаг 3: Извлечение CSV из архива
 	csvData, err := h.archiveService.Extract(fileData, archiveType)
 	if err != nil {
 		log.Printf("Failed to extract archive: %v", err)
@@ -88,7 +79,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Шаг 4: Парсинг CSV
 	rawRecords, totalCount, err := h.csvService.Parse(csvData)
 	if err != nil {
 		log.Printf("Failed to parse CSV: %v", err)
@@ -97,7 +87,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Шаг 5: Валидация и обнаружение дубликатов
 	validationResult, err := h.validatorService.Validate(rawRecords, totalCount)
 	if err != nil {
 		log.Printf("Failed to validate data: %v", err)
@@ -106,7 +95,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Шаг 6: Вставка валидных записей в БД
 	err = h.repo.BulkInsert(validationResult.ValidRecords)
 	if err != nil {
 		log.Printf("Failed to insert data: %v", err)
@@ -115,7 +103,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Шаг 7: Получение статистики из БД
 	stats, err := h.repo.GetStatistics()
 	if err != nil {
 		log.Printf("Failed to get statistics: %v", err)
@@ -124,7 +111,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Шаг 8: Формирование ответа
 	response := models.UploadResponse{
 		TotalCount:      validationResult.TotalCount,
 		DuplicatesCount: validationResult.DuplicatesCount,
@@ -133,7 +119,6 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		TotalPrice:      stats.TotalPrice,
 	}
 
-	// Шаг 9: Отправка JSON ответа
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
 }

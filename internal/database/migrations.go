@@ -5,9 +5,7 @@ import (
 	"fmt"
 )
 
-// RunMigrations выполняет SQL миграции для создания таблиц и индексов
 func RunMigrations(db *sql.DB) error {
-	// SQL запрос для создания таблицы prices
 	createTableQuery := `
 	CREATE TABLE IF NOT EXISTS prices (
 		id INTEGER PRIMARY KEY,
@@ -18,17 +16,14 @@ func RunMigrations(db *sql.DB) error {
 	);
 	`
 
-	// Выполнение создания таблицы
 	if _, err := db.Exec(createTableQuery); err != nil {
 		return fmt.Errorf("failed to create prices table: %w", err)
 	}
 
-	// SQL запрос для создания индекса на category
 	createIndexQuery := `
 	CREATE INDEX IF NOT EXISTS idx_prices_category ON prices(category);
 	`
 
-	// Выполнение создания индекса
 	if _, err := db.Exec(createIndexQuery); err != nil {
 		return fmt.Errorf("failed to create index on category: %w", err)
 	}

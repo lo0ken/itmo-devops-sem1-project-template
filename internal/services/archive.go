@@ -9,15 +9,12 @@ import (
 	"strings"
 )
 
-// ArchiveService предоставляет методы для работы с архивами
 type ArchiveService struct{}
 
-// NewArchiveService создает новый экземпляр сервиса
 func NewArchiveService() *ArchiveService {
 	return &ArchiveService{}
 }
 
-// Extract извлекает CSV файл из архива (ZIP или TAR)
 func (s *ArchiveService) Extract(data []byte, archiveType string) ([]byte, error) {
 	switch archiveType {
 	case "zip":
@@ -29,14 +26,12 @@ func (s *ArchiveService) Extract(data []byte, archiveType string) ([]byte, error
 	}
 }
 
-// extractZip извлекает первый CSV файл из ZIP архива
 func (s *ArchiveService) extractZip(data []byte) ([]byte, error) {
 	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read zip archive: %w", err)
 	}
 
-	// Поиск первого CSV файла
 	for _, file := range reader.File {
 		if strings.HasSuffix(strings.ToLower(file.Name), ".csv") {
 			f, err := file.Open()
@@ -57,7 +52,6 @@ func (s *ArchiveService) extractZip(data []byte) ([]byte, error) {
 	return nil, fmt.Errorf("no CSV file found in zip archive")
 }
 
-// extractTar извлекает первый CSV файл из TAR архива
 func (s *ArchiveService) extractTar(data []byte) ([]byte, error) {
 	tarReader := tar.NewReader(bytes.NewReader(data))
 
