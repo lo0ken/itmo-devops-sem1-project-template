@@ -44,21 +44,71 @@ func (r *PriceRepository) CheckExistingIDs(ids []int) (map[int]bool, error) {
 	return existingMap, nil
 }
 
-func (r *PriceRepository) BulkInsert(prices []models.Price) error {
+func (r *PriceRepository) InsertAndGetStats(prices []models.Price) (*models.Statistics, int, error) {
 	if len(prices) == 0 {
-		return nil
+		return &models.Statistics{}, 0, nil
 	}
 
-	query := "INSERT INTO prices (id, name, category, price, create_date) VALUES ($1, $2, $3, $4, $5)"
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to begin transaction: %w", err)
+	}
 
-	for _, p := range prices {
-		_, err := r.db.Exec(query, p.ID, p.Name, p.Category, p.Price, p.CreateDate)
+	defer func() {
+		if p := recover(); p != nil {
+			tx.Rollback()
+			panic(p)
+		}
+	}()
+
+	duplicatesCount := 0
+	insertedCount := 0
+
+	for _, price := range prices {
+		var count int
+		checkQuery := `SELECT COUNT(*) FROM prices
+		               WHERE name = $1 AND category = $2 AND price = $3 AND create_date = $4`
+		err = tx.QueryRow(checkQuery, price.Name, price.Category, price.Price, price.CreateDate).Scan(&count)
 		if err != nil {
+			tx.Rollback()
+			return nil, 0, fmt.Errorf("failed to check duplicate: %w", err)
+		}
+
+		if count > 0 {
+			duplicatesCount++
 			continue
 		}
+
+		insertQuery := `INSERT INTO prices (name, category, price, create_date)
+		                VALUES ($1, $2, $3, $4)`
+		_, err = tx.Exec(insertQuery, price.Name, price.Category, price.Price, price.CreateDate)
+		if err != nil {
+			tx.Rollback()
+			return nil, 0, fmt.Errorf("failed to insert price: %w", err)
+		}
+		insertedCount++
 	}
 
-	return nil
+	statsQuery := `
+		SELECT
+			COUNT(DISTINCT category) as total_categories,
+			COALESCE(SUM(price), 0) as total_price
+		FROM prices
+	`
+	var stats models.Statistics
+	stats.TotalItems = insertedCount
+	err = tx.QueryRow(statsQuery).Scan(&stats.TotalCategories, &stats.TotalPrice)
+	if err != nil {
+		tx.Rollback()
+		return nil, 0, fmt.Errorf("failed to get statistics: %w", err)
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return &stats, duplicatesCount, nil
 }
 
 func (r *PriceRepository) GetStatistics() (*models.Statistics, error) {

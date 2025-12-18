@@ -23,7 +23,7 @@ func (h *PricesHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 
 	if minStr := queryParams.Get("min"); minStr != "" {
 		minPrice, err := strconv.ParseFloat(minStr, 64)
-		if err != nil || minPrice <= 0 {
+		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("invalid min parameter"))
 			return
@@ -33,7 +33,7 @@ func (h *PricesHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 
 	if maxStr := queryParams.Get("max"); maxStr != "" {
 		maxPrice, err := strconv.ParseFloat(maxStr, 64)
-		if err != nil || maxPrice <= 0 {
+		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("invalid max parameter"))
 			return
@@ -68,5 +68,7 @@ func (h *PricesHandler) HandleGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=data.zip")
 	w.WriteHeader(http.StatusOK)
-	w.Write(zipData)
+	if _, err := w.Write(zipData); err != nil {
+		log.Printf("Failed to write response: %v", err)
+	}
 }

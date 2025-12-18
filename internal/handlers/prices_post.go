@@ -95,17 +95,9 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.repo.BulkInsert(validationResult.ValidRecords)
+	stats, duplicatesCount, err := h.repo.InsertAndGetStats(validationResult.ValidRecords)
 	if err != nil {
-		log.Printf("Failed to insert data: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "failed to insert data"})
-		return
-	}
-
-	stats, err := h.repo.GetStatistics()
-	if err != nil {
-		log.Printf("Failed to get statistics: %v", err)
+		log.Printf("Failed to insert data and get statistics: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": "database error"})
 		return
@@ -113,7 +105,7 @@ func (h *PricesHandler) HandlePost(w http.ResponseWriter, r *http.Request) {
 
 	response := models.UploadResponse{
 		TotalCount:      validationResult.TotalCount,
-		DuplicatesCount: validationResult.DuplicatesCount,
+		DuplicatesCount: validationResult.DuplicatesCount + duplicatesCount,
 		TotalItems:      stats.TotalItems,
 		TotalCategories: stats.TotalCategories,
 		TotalPrice:      stats.TotalPrice,
